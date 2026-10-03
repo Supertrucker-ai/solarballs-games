@@ -97,7 +97,9 @@ button{font:inherit;color:inherit;cursor:pointer;border:none;background:none}
 .sec-h{display:flex;align-items:baseline;gap:10px;padding:6px 8px 4px;font-weight:900;color:var(--ink)}
 .sec-h b{font-family:"Arial Black",system-ui,sans-serif;font-size:24px;color:#fff;background:var(--pur);border-radius:12px;padding:0 12px;line-height:34px;box-shadow:0 3px 0 #4a30b0}
 .sec-h span{font-size:16px}
-.card.dim{opacity:.45;filter:grayscale(.55)}
+.card.inshow::after{content:'\2605';position:absolute;top:1px;right:2px;width:17px;height:17px;border-radius:50%;background:#ffc83d;color:#7a3b00;font-size:12px;line-height:17px;text-align:center;font-weight:900;box-shadow:0 1px 0 rgba(0,0,0,.25);pointer-events:none}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 96px);transform:translate(-50%,20px);background:#3fcf5a;color:#fff;font-weight:900;font-size:19px;padding:9px 18px;border-radius:999px;border:3px solid var(--ink);box-shadow:0 4px 0 rgba(0,0,0,.25);opacity:0;pointer-events:none;z-index:60;transition:opacity .2s,transform .2s;white-space:nowrap;max-width:94vw;text-shadow:0 2px 0 rgba(0,0,0,.25)}
+.toast.on{opacity:1;transform:translate(-50%,0)}
 .chips{flex:none;display:flex;gap:8px;align-items:center;margin:0 0 6px}
 .chip{min-height:46px;min-width:52px;padding:0 12px;border-radius:999px;background:#fff;font-weight:900;font-size:22px;font-family:"Arial Black",system-ui,sans-serif;box-shadow:0 4px 0 rgba(0,0,0,.18);color:var(--ink)}
 .chip.on{background:var(--pur);color:#fff;box-shadow:0 4px 0 #4a30b0}
@@ -654,6 +656,7 @@ button{font:inherit;color:inherit;cursor:pointer;border:none;background:none}
 <body>
 <div id="app">
 <div id="stars" aria-hidden="true"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <!-- SELECT -->
 <div id="s-select" class="screen">
   <div class="topbar"><div class="grow"><div class="logo" id="sel-logo"></div></div><button class="gear" data-act="settings" aria-label="Settings"><span class="gearic"></span></button></div>
@@ -1203,20 +1206,22 @@ function buildGrid(){
 }
 function renderSel(){
   var i=ST.picked,av=$('#sel-av'),who=$('#sel-who'),pb=$('#btn-play');
-  $$('#grid .card').forEach(function(c){var ci=+c.getAttribute('data-i');c.classList.toggle('sel',ci===i);c.classList.toggle('dim',ci>=0&&!inField(ci))});
+  $$('#grid .card').forEach(function(c){var ci=+c.getAttribute('data-i');c.classList.toggle('sel',ci===i);c.classList.toggle('inshow',ci>=0&&inField(ci))});
   if(i===null){av.innerHTML='';who.innerHTML='Pick your space ball!<small>Tap one, or tap the ? for a surprise.</small>';pb.disabled=true}
   else if(i===-1){av.innerHTML='<div class="card rand" style="width:56px;height:56px;border-radius:50%;min-height:0"><b style="font-size:34px">?</b></div>';who.innerHTML='Random!<small>A surprise space ball picks you!</small>';pb.disabled=false}
   else{var c=CAST[i];av.innerHTML=fig(i,'happy wave');who.innerHTML='<span class="nm'+(c.n.length>15?' long':'')+'">'+c.n+'</span><small>&ldquo;'+c.line+'&rdquo;</small><small class="fact"><b>Fun fact:</b> '+c.fact+'</small>';pb.disabled=false}
   $('#setup-sum').textContent=fieldLabel();
 }
 // a pick outside the current field invites them in: the smallest field that has them (or adds them to a custom list)
+var toastT=0;
+function toast(t){var e=$('#toast'),sb=document.querySelector('.sel-bar');e.textContent=t;if(sb&&sb.offsetParent)e.style.bottom=Math.round(innerHeight-sb.getBoundingClientRect().top+8)+'px';e.classList.add('on');clearTimeout(toastT);toastT=setTimeout(function(){e.classList.remove('on')},FAST?900:1800)}
 function inviteIn(ci){
-  if(ci<0||inField(ci))return;
-  if(ST.field==='custom'){ST.custom=ST.custom.concat([ci]);Store.set('custom',ST.custom);return}
-  var cat=CAST[ci].cat;ST.field=(cat==='planet'||cat==='dwarf')?'pd':'all';Store.set('field',ST.field);
+  if(ci<0||inField(ci))return false;
+  if(ST.field==='custom'){ST.custom=ST.custom.concat([ci]);Store.set('custom',ST.custom);return true}
+  var cat=CAST[ci].cat;ST.field=(cat==='planet'||cat==='dwarf')?'pd':'all';Store.set('field',ST.field);return true;
 }
 $('#grid').addEventListener('click',function(e){var c=e.target.closest('.card');if(!c)return;var ci=+c.getAttribute('data-i');
-  ST.picked=ci;Snd.play(ci<0?'boing':'select');renderSel()});
+  ST.picked=ci;Snd.play(ci<0?'boing':'select');var added=inviteIn(ci);renderSel();if(added){toast('\u2B50 '+CAST[ci].n+' joins the show!')}});
 var SECORDER=['sun','planet','dwarf','moon','rogue'];
 function curTab(){var w=$('#gridwrap'),t='sun',top=w.scrollTop+70,atEnd=w.scrollTop>4&&w.scrollTop>=w.scrollHeight-w.clientHeight-4;
   SECORDER.forEach(function(s){var el=$('#sec-'+s);if(el&&w.scrollTop+ (el.offsetTop-w.offsetTop)*0>=0&&top>=el.offsetTop-w.offsetTop)t=s});
@@ -1819,6 +1824,7 @@ async function playRLGL(c){
 }
 
 /* ===== ROUND C + FINAL: TUG OF WAR ===== */
+/* NOTE: never run a CSS transform animation (squashin, wob, pop...) on an element that is positioned with an inline transform: the animation replaces it and the element warps to 0,0. Animate the inner figure instead. */
 async function playTug(c,isFinal){
   var host=$('#arena-host'),d=D(),alive=c.alive.slice(),meIn=c.inGame;
   var teamA,teamB; // A = player's side (left, green). In spectate sims A is just a side.
@@ -1857,7 +1863,7 @@ async function playTug(c,isFinal){
   }
   place();
   function say(t,col){ban.className='banner outline pop';ban.style.color=col||'#fff';ban.textContent=t;ban.style.animation='none';void ban.offsetWidth;ban.style.animation='';var tt=t;setTimeout(function(){if(ban.textContent===tt)ban.textContent=''},600+900*SPEED)}
-  function tapIt(){if(over||!started||!meIn)return;pos=Math.min(1,pos+d.tugTap*(isFinal?1.0:1));taps++;lastTap=T;Snd.play('pull',taps%12);btn.classList.add('held');setTimeout(function(){btn.classList.remove('held')},60);var s=all.filter(function(m){return m.me})[0];if(s){s.el.classList.remove('squashin');void s.el.offsetWidth;s.el.classList.add('squashin')}}
+  function tapIt(){if(over||!started||!meIn)return;pos=Math.min(1,pos+d.tugTap*(isFinal?1.0:1));taps++;lastTap=T;Snd.play('pull',taps%12);btn.classList.add('held');setTimeout(function(){btn.classList.remove('held')},60);var s=all.filter(function(m){return m.me})[0];if(s){var sq=s.el.firstChild;sq.classList.remove('squashin');void sq.offsetWidth;sq.classList.add('squashin')}}
   CURF=function(){return{id:isFinal?'final':'tug',pos:pos,started:started,over:over,winner:winner,taps:taps,team:teamA.slice()}};
   if(!meIn){btn.style.display='none'}
   btn.onpointerdown=function(e){e.preventDefault();tapIt()};
@@ -1976,7 +1982,7 @@ async function playChairs(c){
     await sleep(500);
     var outs=meSlow?[ST.you].concat(doomedL.slice(1)):doomedL;
     Snd.play('oops');
-    outs.forEach(function(l){var o=lt[l];if(o){o.el.firstChild.firstChild.setAttribute('class','csvg fig-svg oh');o.el.classList.add('squashin')}});
+    outs.forEach(function(l){var o=lt[l];if(o){o.el.firstChild.firstChild.setAttribute('class','csvg fig-svg oh');o.el.firstChild.classList.add('squashin')}});
     if(meSlow)setBan('Oops! No chair!','stop');else{setBan('You got a chair!','music');Snd.play('win')}
     flungAll=flungAll.concat(outs);cur=cur.filter(function(l){return outs.indexOf(l)<0});
     if(meSlow)result='me-out';
@@ -2289,7 +2295,7 @@ async function playPop(c){
   await sleep(350);
   await until(function(){return popped>=goal||(fin&&oppN>=goal)},T,function(dt,t){
     tt=t+pen;tbar.style.transform='scaleX('+Math.max(0,1-tt/T)+')';
-    bubs.forEach(function(b){b.y-=b.vy*dt;b.x=clamp(b.base+Math.sin(t*1.4+b.ph)*10,0,W-b.sz);if(b.y<-b.sz-4){b.el.remove();b.dead=true}b.el.style.transform='translate('+b.x+'px,'+b.y+'px)'});
+    bubs.forEach(function(b){b.y-=b.vy*dt;b.x=clamp(b.base+Math.sin(t*1.4+b.ph)*10,0,W-b.sz);if(b.y<-b.sz-4){b.el.remove();b.dead=true}b.el.style.left=b.x+'px';b.el.style.top=b.y+'px'});
     var before=bubs.length;bubs=bubs.filter(function(b){return !b.dead});for(var q=bubs.length;q<NB;q++)mk(false);
     if(fin){aiNext-=dt;if(aiNext<=0&&oppN<goal){oppN++;setDots('vs-op',oppN);aiNext=rr(d.blAi[0],d.blAi[1]);Snd.play('tick')}}
     if(tt>=T)return true;
